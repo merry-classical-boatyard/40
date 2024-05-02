@@ -1,0 +1,41 @@
+import Iter expose { Iter }
+
+pub type State s r {
+  State(s -> (s, r)),
+}
+
+pub get: State s s =
+  State(\s -> (s, s))
+
+pub set(s: s): State s () =
+  State(\_ -> (s, ()))
+
+pub modify(f: s -> s): State s () =
+  State(\s -> (f(s), ()))
+
+pub modify_ret(f: s -> (s, r)): State s r =
+  State(f)
+
+pub pure(x: r): State s r =
+  State(\s -> (s, x))
+
+pub run(body: State s r, init: s): (s, r) =
+  let State(f) = body in
+  f(init)
+
+pub bind(fst: State s a, cont: a -> State s b): State s b =
+  State(\s1 ->
+    let (s2, res) = run(fst, s1) in
+    run(cont(res), s2)
+  )
+
+pub seq(fst: State s a, snd: State s b): State s b =
+  bind(fst, \_ -> snd)
+
+pub for_each(it: Iter a, f: a -> State s ()): State s () =
+  State(\init ->
+    let final =
+      Iter.foldl(it, init, \(accum, x) -> let (new_accum, _) = run(f(x), accum) in new_accum)
+    in
+    (final, ())
+  )

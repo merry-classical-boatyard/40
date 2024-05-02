@@ -1,0 +1,14 @@
+pub id(x: a): a = x
+
+pub compose(f: a -> b, g: b -> c): (a -> c) =
+  \x -> g(f(x))
+
+pub const(x: a): b -> a =
+  \_ -> x
+
+pub iterate(func: a -> a, n: Int): (a -> a) =
+  if n <= 0 {
+    id
+  } else {
+    compose(func, iterate(func, n - 1))
+  }

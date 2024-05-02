@@ -1,0 +1,226 @@
+// based off https://github.com/koka-lang/koka/blob/b3122869ac74bfb6f432f7e76eeb723b1f69a491/test/bench/koka/rbtree-ck.kk
+
+module Core = file "core/core.mor"
+  expose {
+    module Io expose { writeln },
+    module String expose { int_to_string, string_to_nat, equal },
+    module Option expose { Option { Some, None } },
+  }
+
+type Color {
+  Red,
+  Black,
+}
+
+pub type Tree k a {
+  pub Leaf,
+  pub Node(Color, Tree k a, k, a, Tree k a),
+}
+
+type TreePath k a {
+  Nil,
+  LNode(Color, TreePath k a, k, a, Tree k a), // holds the right subtree not taken
+  RNode(Color, Tree k a,       k, a, TreePath k a), // holds the left  subtree not taken
+}
+
+//applyPath(f : k -> b, c: TreePath k a): Option b  =
+//  match c {
+//    Nil -> None,
+//    LNode(_,_,k,_,_) -> Some(f(k)),
+//    RNode(_,_,k,_,_) -> Some(f(k)),
+//  }
+
+pub type Loc k a { pub Loc(TreePath k a, Tree k a) }
+
+applyPath(f : k -> b, p: Loc k a): Option b  =
+  let Loc(x, _) = p in
+  match x {
+    Nil -> None,
+    LNode(_,_,k,_,_) -> Some(f(k)),
+    RNode(_,_,k,_,_) -> Some(f(k)),
+  }
+
+applyNode(f : k -> b, p: Loc k a): Option b  =
+  let Loc(_, x) = p in
+  match x {
+    Leaf -> None,
+    Node(_,_,k,_,_) -> Some(f(k)),
+  }
+
+pathUp(p: Loc k a) : Loc k a =
+  let Loc(path, t) = p in
+  match path {
+    Nil -> p,
+    LNode(c,l,k,x,r) -> Loc(l, Node(c,t,k,x,r)),
+    RNode(c,l,k,x,r) -> Loc(r, Node(c,l,k,x,t))
+  }
+pathLeft(p: Loc k a): Loc k a =
+  let Loc(path, t) = p in
+  match t {
+    Leaf -> p,
+    Node(c,l,k,x,r) -> Loc(LNode(c,path,k,x,r), l)
+  }
+pathRight(p: Loc k a): Loc k a =
+  let Loc(path, t) = p in
+  match t {
+    Leaf -> p,
+    Node(c,l,k,x,r) -> Loc(RNode(c,l,k,x,path), r)
+  }
+
+// seek and helper functions
+// assumes monotone predicate pred (a <= b -> pred(a) <= pred(b))
+//   and monotone sequence of calls (if called with pred1 then pred2, then forall k, pred2(k) implies pred1(k))
+
+// going up from l, find a node satisfying pred (not necessarily least in tree)
+seekInit(pred: k -> Bool, l : Loc k a): Loc k a =
+  match applyPath(pred, l) {
+    None -> l,
+    Some(True) -> pathUp(l),
+    _ -> seekInit(pred, pathUp(l))
+  }
+
+// going down from l, find the least node satisfying pred
+seekFirst(pred: k -> Bool, l : Loc k a, out: Option (Loc k a)): Option (Loc k a) =
+  match l {
+    Loc(_, Leaf) -> out,
+    Loc(_, Node(_,_,k,_,_)) ->
+      if pred(k) {
+        seekFirst(pred, pathLeft(l), Some(l))
+      } else {
+        seekFirst(pred, pathRight(l), out)
+      }
+  }
+
+// starting from l, find the least node satisfying pred
+pub seek(pred: k -> Bool, l: Loc k a): Option (Loc k a) =
+  match applyNode(pred, l) {
+    Some(True) -> Some(l),
+    _ -> seekFirst(pred, seekInit(pred, l), None)
+  }
+
+//pub rbStream(lt: (k,k) -> Bool, le: (k,k) -> Bool, defaultK: k, defaultV: a, p : Option (Loc a)) : Stream.Stream k a =
+//  Stream.Stream(
+//    \() -> match p { None -> False, _ -> True },
+//    \() -> match p { Some(Loc(_, Node(_,_,k,_,_))) -> k, _ -> defaultK },
+//    \(i, r) ->
+//      match p {
+//        Some(l) -> if r {
+//            rbStream(lt, le, defaultK, defaultV, seek(\j -> lt(i, j), l))
+//          } else {
+//            rbStream(lt, le, defaultK, defaultV, seek(\j -> le(i, j), l))
+//          },
+//        None -> rbStream(lt, le, defaultK, defaultV, None)
+//      },
+//    \() -> True,
+//    \() -> match p { Some(Loc(_, Node(_,_,_,v,_))) -> v, _ -> defaultV }
+//  )
+
+// library code:
+
+//find(t: Tree v, key: Int): Option v =
+//  match t {
+//    Leaf -> None,
+//    Node(_, l, k, v, r) ->
+//      if      key < k { find(l, key) }
+//      else if key = k { Some(v) }
+//      else            { find(r, key) }
+//  }
+//
+//fold(t: Tree v, b: a, f: (Int, v, a) -> a): a =
+//  match t {
+//    Leaf -> b,
+//    Node(_, l, k, v, r) -> fold(r, f(k, v, fold(l, b, f)), f)
+//  }
+//
+//balance1(kv: Int, vv: v, t: Tree v, s: Tree v): Tree v =
+//  match s {
+//    Leaf -> Leaf,
+//    Node(_, Node(Red, l, kx, vx, r1), ky, vy, r2)
+//      -> Node(Red, Node(Black, l, kx, vx, r1), ky, vy, Node(Black, r2, kv, vv, t)),
+//    Node(_, l1, ky, vy, Node(Red, l2, kx, vx, r))
+//      -> Node(Red, Node(Black, l1, ky, vy, l2), kx, vx, Node(Black, r, kv, vv, t)),
+//    Node(_, l, ky, vy, r)
+//      -> Node(Black, Node(Red, l, ky, vy, r), kv, vv, t),
+//  }
+//
+//balance2(t: Tree v, kv: Int, vv: v, s: Tree v): Tree v =
+//  match s {
+//    Leaf -> Leaf,
+//    Node(_, Node(Red, l, kx1, vx1, r1), ky, vy, r2)
+//      -> Node(Red, Node(Black, t, kv, vv, l), kx1, vx1, Node(Black, r1, ky, vy, r2)),
+//    Node(_, l1, ky, vy, Node(Red, l2, kx2, vx2, r2))
+//      -> Node(Red, Node(Black, t, kv, vv, l1), ky, vy, Node(Black, l2, kx2, vx2, r2)),
+//    Node(_, l, ky, vy, r)
+//      -> Node(Black, t, kv, vv, Node(Red, l, ky, vy, r)),
+//  }
+//
+//is_red(t : Tree v) : Bool =
+//  match t {
+//    Node(Red, _, _, _, _) -> True,
+//    _         -> False,
+//  }
+//
+//ins(t: Tree v, kx: Int, vx: v): Tree v =
+//  match t {
+//    Leaf
+//      -> Node(Red, Leaf, kx, vx, Leaf),
+//    Node(Red, a, ky, vy, b)
+//      -> if kx < ky { Node(Red, ins(a, kx, vx), ky, vy, b) }
+//         else if kx = ky { Node(Red, a, kx, vx, b) }
+//         else { Node(Red, a, ky, vy, ins(b, kx, vx)) },
+//    Node(Black, a, ky, vy, b)
+//      -> if kx < ky { if is_red(a) { balance1(ky, vy, b, ins(a, kx, vx)) }
+//                                       else { Node(Black, ins(a, kx, vx), ky, vy, b) } }
+//         else if kx = ky { Node(Black, a, kx, vx, b) }
+//         else if is_red(b) { balance2(a, ky, vy, ins(b, kx, vx)) }
+//         else { Node(Black, a, ky, vy, ins(b, kx, vx)) },
+//  }
+//
+//set_black(t: Tree v) : Tree v =
+//  match t {
+//    Node(_, l, k, v, r) -> Node(Black, l, k, v, r),
+//    _ -> t,
+//  }
+//
+//
+//insert(t: Tree v, k: Int, v: v): Tree v =
+//  if is_red(t) {
+//    set_black(ins(t, k, v))
+//  } else {
+//    ins(t, k, v)
+//  }
+//
+//mod(a: Int, b: Int): Int =
+//  a - b * (a / b)
+//
+//
+//make_tree_rbtree_aux(n: Int, t: Tree Bool) : Tree Bool =
+//  if n <= 0 { t } else {
+//    let n1 = n - 1 in
+//    make_tree_rbtree_aux(n1, insert(t, n1, mod(n1, 10) = 0))
+//  }
+//
+//make_tree_rbtree(n : Int) : Tree Bool =
+//  make_tree_rbtree_aux(n, Leaf)
+//
+//test_rbtree(n : Int): Int =
+//  let t = make_tree_rbtree(n) in
+//  let v = fold(t, 0, \(k,v,r) -> if v { r + 1 } else { r }) in
+//  v
+//
+//make_tree_rbtreeck_aux(freq : Int, n: Int, t: Tree Bool, acc : Array (Tree Bool)): Array (Tree Bool)=
+//  if n <= 0 { push(acc, t) } else {
+//    let t_ = insert(t, n, mod(n, 10) = 0) in
+//    make_tree_rbtreeck_aux(freq, n - 1, t_, if (mod(n, freq)=0) { push(acc, t_) } else { acc })
+//  }
+//
+//make_tree_rbtreeck(freq : Int, n: Int): Array (Tree Bool) =
+//  make_tree_rbtreeck_aux(freq, n, Leaf, [])
+//test_rbtreeck(n : Int): Int =
+//  let trees = make_tree_rbtreeck(5, n) in
+//  let v = fold(get(trees, len(trees) - 1), 0, \(k,v,r) -> if (v) { r + 1 } else { r }) in
+//  v
+
+
+// there are two benchmarks in this file, rbtree, and rbtree-ck, this file runs them both
+proc main(): () = ()

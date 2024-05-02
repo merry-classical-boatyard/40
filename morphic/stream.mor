@@ -1,0 +1,544 @@
+module Core = file "core/core.mor"
+  expose {
+    module String expose { int_to_string },
+    module Iter,
+    module Array expose { concat },
+    module Io expose { writeln },
+    module Option expose { Option { None, Some } },
+    module Rand expose { seed_mt19937_64, mt19937_64_next },
+  }
+
+module RB = {
+  import Option expose { Option { None, Some } }
+  import Iter
+
+  type Color {
+    Red,
+    Black,
+  }
+
+  pub type Tree a {
+    pub Leaf,
+    pub Node(Color, Tree a, Int, a, Tree a),
+  }
+
+  pub min(t: Tree v): Option Int =
+    match t {
+      Leaf -> None,
+      Node(_, Leaf, k, _, _) -> Some(k),
+      Node(_, l, k, _, _) -> min(l)
+    }
+
+  pub find(t: Tree v, key: Int): Option v =
+    match t {
+      Leaf -> None,
+      Node(_, l, k, v, r) ->
+        if      key < k { find(l, key) }
+        else if key = k { Some(v) }
+        else            { find(r, key) }
+    }
+
+  pub findLUB(t: Tree v, key: Int, x: Option (Int,v)): Option (Int,v) =
+    match t {
+      Leaf -> x,
+      Node(_, l, k, v, r) ->
+        if      key < k { findLUB(l, key, Some(k,v)) }
+        else if key = k { Some(k, v) }
+        else            { findLUB(r, key, x) }
+    }
+
+  pub findLUB_lt(t: Tree v, key: Int, x: Option (Int,v)): Option (Int,v) =
+    match t {
+      Leaf -> x,
+      Node(_, l, k, v, r) ->
+        if      key < k { findLUB_lt(l, key, Some(k,v)) }
+        else            { findLUB_lt(r, key, x) }
+    }
+
+  pub fold(t: Tree v, b: a, f: (Int, v, a) -> a): a =
+    match t {
+      Leaf -> b,
+      Node(_, l, k, v, r) -> fold(r, f(k, v, fold(l, b, f)), f)
+    }
+
+  balance1(kv: Int, vv: v, t: Tree v, s: Tree v): Tree v =
+    match s {
+      Leaf -> Leaf,
+      Node(_, Node(Red, l, kx, vx, r1), ky, vy, r2)
+        -> Node(Red, Node(Black, l, kx, vx, r1), ky, vy, Node(Black, r2, kv, vv, t)),
+      Node(_, l1, ky, vy, Node(Red, l2, kx, vx, r))
+        -> Node(Red, Node(Black, l1, ky, vy, l2), kx, vx, Node(Black, r, kv, vv, t)),
+      Node(_, l, ky, vy, r)
+        -> Node(Black, Node(Red, l, ky, vy, r), kv, vv, t),
+    }
+
+  balance2(t: Tree v, kv: Int, vv: v, s: Tree v): Tree v =
+    match s {
+      Leaf -> Leaf,
+      Node(_, Node(Red, l, kx1, vx1, r1), ky, vy, r2)
+        -> Node(Red, Node(Black, t, kv, vv, l), kx1, vx1, Node(Black, r1, ky, vy, r2)),
+      Node(_, l1, ky, vy, Node(Red, l2, kx2, vx2, r2))
+        -> Node(Red, Node(Black, t, kv, vv, l1), ky, vy, Node(Black, l2, kx2, vx2, r2)),
+      Node(_, l, ky, vy, r)
+        -> Node(Black, t, kv, vv, Node(Red, l, ky, vy, r)),
+    }
+
+  is_red(t : Tree v) : Bool =
+    match t {
+      Node(Red, _, _, _, _) -> True,
+      _         -> False,
+    }
+
+  ins(t: Tree v, kx: Int, vx: v): Tree v =
+    match t {
+      Leaf
+        -> Node(Red, Leaf, kx, vx, Leaf),
+      Node(Red, a, ky, vy, b)
+        -> if kx < ky { Node(Red, ins(a, kx, vx), ky, vy, b) }
+           else if kx = ky { Node(Red, a, kx, vx, b) }
+           else { Node(Red, a, ky, vy, ins(b, kx, vx)) },
+      Node(Black, a, ky, vy, b)
+        -> if kx < ky { if is_red(a) { balance1(ky, vy, b, ins(a, kx, vx)) }
+                                         else { Node(Black, ins(a, kx, vx), ky, vy, b) } }
+           else if kx = ky { Node(Black, a, kx, vx, b) }
+           else if is_red(b) { balance2(a, ky, vy, ins(b, kx, vx)) }
+           else { Node(Black, a, ky, vy, ins(b, kx, vx)) },
+    }
+
+  set_black(t: Tree v) : Tree v =
+    match t {
+      Node(_, l, k, v, r) -> Node(Black, l, k, v, r),
+      _ -> t,
+    }
+
+
+  insert(t: Tree v, k: Int, v: v): Tree v =
+    if is_red(t) {
+      set_black(ins(t, k, v))
+    } else {
+      ins(t, k, v)
+    }
+
+  pub of_array(t: Array Int): Tree Bool =
+    Iter.foldl(Iter.items(t), Leaf, \(tree, key) -> insert(tree, key, True))
+
+  mod(a: Int, b: Int): Int =
+    a - b * (a / b)
+
+
+  make_tree_rbtree_aux(n: Int, t: Tree Int) : Tree Int =
+    if n <= 0 { t } else {
+      let n1 = n - 1 in
+      make_tree_rbtree_aux(n1, insert(t, n1, n1))
+    }
+
+  pub make_tree_rbtree(n : Int) : Tree Int =
+    make_tree_rbtree_aux(n, Leaf)
+
+  //test_rbtree(n : Int): Int =
+  //  let t = make_tree_rbtree(n) in
+  //  let v = fold(t, 0, \(k,v,r) -> if v { r + 1 } else { r }) in
+  //  v
+
+  make_tree_rbtreeck_aux(freq : Int, n: Int, t: Tree Bool, acc : Array (Tree Bool)): Array (Tree Bool)=
+    if n <= 0 { push(acc, t) } else {
+      let t_ = insert(t, n, mod(n, 10) = 0) in
+      make_tree_rbtreeck_aux(freq, n - 1, t_, if (mod(n, freq)=0) { push(acc, t_) } else { acc })
+    }
+
+  make_tree_rbtreeck(freq : Int, n: Int): Array (Tree Bool) =
+    make_tree_rbtreeck_aux(freq, n, Leaf, [])
+
+  test_rbtreeck(n : Int): Int =
+    let trees = make_tree_rbtreeck(5, n) in
+    let v = fold(get(trees, len(trees) - 1), 0, \(k,v,r) -> if (v) { r + 1 } else { r }) in
+    v
+
+  // stream stuff
+  type TreePath a {
+    Nil,
+    LNode(Color, TreePath a, Int, a, Tree a), // holds the right subtree not taken
+    RNode(Color, Tree a,     Int, a, TreePath a), // holds the left  subtree not taken
+  }
+
+  pub type Loc a { pub Loc(TreePath a, Tree a) }
+
+  pub toLoc(t : Tree a) : Loc a = Loc(Nil, t)
+
+  applyPath(f : Int -> b, p: Loc a): Option b  =
+    let Loc(x, _) = p in
+    match x {
+      Nil -> None,
+      LNode(_,_,k,_,_) -> Some(f(k)),
+      RNode(_,_,k,_,_) -> Some(f(k)),
+    }
+
+  applyNode(f : Int -> b, p: Loc a): Option b  =
+    let Loc(_, x) = p in
+    match x {
+      Leaf -> None,
+      Node(_,_,k,_,_) -> Some(f(k)),
+    }
+
+  pathUp(p: Loc a) : Loc a =
+    let Loc(path, t) = p in
+    match path {
+      Nil -> p,
+      LNode(c,l,k,x,r) -> Loc(l, Node(c,t,k,x,r)),
+      RNode(c,l,k,x,r) -> Loc(r, Node(c,l,k,x,t))
+    }
+  pathLeft(p: Loc a): Loc a =
+    let Loc(path, t) = p in
+    match t {
+      Leaf -> p,
+      Node(c,l,k,x,r) -> Loc(LNode(c,path,k,x,r), l)
+    }
+  pathRight(p: Loc a): Loc a =
+    let Loc(path, t) = p in
+    match t {
+      Leaf -> p,
+      Node(c,l,k,x,r) -> Loc(RNode(c,l,k,x,path), r)
+    }
+  first_aux(l : Loc a): Loc a =
+    match l {
+      Loc(p, Leaf) -> pathUp(l),
+      Loc(p, _) -> first_aux(pathLeft(l))
+    }
+  pub first(t: Tree a): Loc a =
+    let l = Loc(Nil, t) in
+    first_aux(l)
+
+  // seek and helper functions
+  // assumes monotone predicate pred (a <= b -> pred(a) <= pred(b))
+  //   and monotone sequence of calls (if called with pred1 then pred2, then forall k, pred2(k) implies pred1(k))
+
+  // going up from l, find a node satisfying pred (not necessarily least in tree)
+  seekUp(pred: Int -> Bool, l : Loc a): Loc a =
+    match applyPath(pred, l) {
+      None -> l,
+      Some(True) -> pathUp(l),
+      _ -> seekUp(pred, pathUp(l))
+    }
+  seekUp_(pred: Int -> Bool, l : Loc a): Loc a =
+    seekUp(pred, l)
+
+  // going down from l, find the least node satisfying pred
+  seekDown(pred: Int -> Bool, l : Loc a, out: Option (Loc a)): Option (Loc a) =
+    match l {
+      Loc(_, Leaf) -> out,
+      Loc(_, Node(_,_,k,_,_)) ->
+        if pred(k) {
+          seekDown(pred, pathLeft(l), Some(l))
+        } else {
+          seekDown(pred, pathRight(l), out)
+        }
+    }
+  seekDown_(pred: Int -> Bool, l : Loc a, out: Option (Loc a)): Option (Loc a) =
+    seekDown(pred, l, out)
+
+
+  // starting from l, find the least node satisfying pred
+  pub seek(pred: Int -> Bool, l: Loc a): Option (Loc a) =
+    match applyNode(pred, l) {
+      Some(True) -> Some(l),
+      _ -> seekDown_(pred, seekUp_(pred, l), None)
+    }
+
+} with { Option, Iter }
+
+module Stream = {
+  import Array
+  import String
+  import Iter
+  import Rand expose { seed_mt19937_64, mt19937_64_next }
+  import Option expose { Option { None, Some } }
+  import RB expose { Loc{Loc}, Tree{Node, Leaf} }
+
+  pub type Stream k v {
+    pub Stream(
+      ()        -> Bool,       // valid
+      ()        -> k,          // index
+      (k, Bool) -> Stream k v, // seek
+      ()        -> Bool,       // ready
+      ()        -> v,          // value
+    )
+  }
+
+  pub multiply(mul: (v1, v2) -> v3, a: Stream Int v1, b: Stream Int v2): Stream Int v3 =
+    let Stream(validA, indexA, seekA, readyA, valueA) = a in
+    let Stream(validB, indexB, seekB, readyB, valueB) = b in
+    Stream(
+      \()     -> validA() && validB(),
+      \()     -> max(indexA(), indexB()),
+      \(j, r) -> multiply(mul, seekA(j, r), seekB(j, r)),
+      \()     -> readyA() && readyB() && indexA() = indexB(),
+      \()     -> mul(valueA(), valueB())
+    )
+
+  pub fold(f: (b,k,v) -> b, s: Stream k v, acc: b): b =
+    let Stream(valid, index, seek, ready, value) = s in
+    if valid() {
+      let r = ready() in
+      let i = index() in
+      let acc_ = if r { f(acc, i, value()) } else { acc } in
+      fold(f, seek(i, r), acc_)
+    } else { acc }
+
+  pub max(a: Int, b: Int): Int = if a < b {b} else {a}
+  pub bool_to_nat(b : Bool) : Int = if b {1} else {0}
+
+  pub range(lo: Int, hi: Int): Stream Int Int =
+    Stream(
+      \()     -> lo < hi,
+      \()     -> lo,
+      \(j, r) -> range(max(lo, j + bool_to_nat(r)), hi),
+      \()     -> True,
+      \()     -> lo
+    )
+
+  // 15% slower on 3-way vec mul microbenchmark
+  pub type Ord { Lt, Gt, Eq }
+  pub sparse_aux_cmp(pos: Int, cmp: (k, k) -> Ord, is: Array k, vs: Array v): Stream k v =
+    Stream(
+      \()     -> pos < len(is),
+      \()     -> get(is, pos),
+      \(j, r) ->
+        let i = get(is, pos) in
+        let advance =
+          match cmp(i, j) {
+            Lt -> True,
+            Eq -> r,
+            Gt -> False } in
+        let pos_ = if advance { pos + 1 } else { pos } in
+        sparse_aux_cmp(pos_, cmp, is, vs) ,
+      \()     -> True,
+      \()     -> get(vs, pos)
+    )
+
+  pub sparse_aux(pos: Int, lt: (k, k) -> Bool, eq: (k, k) -> Bool, is: Array k, vs: Array v): Stream k v =
+    Stream(
+      \()     -> pos < len(is),
+      \()     -> get(is, pos),
+      \(j, r) ->
+        let i = get(is, pos) in
+        let advance = lt(i, j) || (r && eq(i, j)) in
+        let pos_ = if advance { pos + 1 } else { pos } in
+        sparse_aux(pos_, lt, eq, is, vs) ,
+      \()     -> True,
+      \()     -> get(vs, pos)
+    )
+
+  pub intCmp(i: Int, j: Int): Ord = if i < j { Lt } else { if i = j { Eq } else { Gt } }
+
+  pub sparse(s: SparseArray Int Int): Stream Int Int =
+    let SparseArray(is, vs) = s in
+    sparse_aux(0, \(i,j) -> i < j, \(i,j) -> i = j, is, vs)
+
+  rbStream(defaultV: a, p : Option (Loc a)) : Stream Int a =
+    Stream(
+      \() -> match p { None -> False, _ -> True },
+      \() -> match p { Some(Loc(_, Node(_,_,k,_,_))) -> k, _ -> 0 },
+      \(i, r) ->
+        match p {
+          Some(l) -> if r {
+              rbStream(defaultV, RB.seek(\j -> (i < j), l))
+            } else {
+              rbStream(defaultV, RB.seek(\j -> (i <= j), l))
+            },
+          None -> rbStream(defaultV, None)
+        },
+      \() -> True,
+      \() -> match p { Some(Loc(_, Node(_,_,_,v,_))) -> v, _ -> defaultV }
+    )
+
+  rbStream_f(defaultV: a, t: Tree a, p: Option (Int, (Int, a))) : Stream Int a =
+    Stream(
+      \() -> match p { None -> False, _ -> True },
+      \() -> match p { Some((_,(k,_))) -> k, _ -> 0 },
+      \(i, r) ->
+        match p {
+          Some(l) ->
+            if r {
+              match RB.findLUB_lt(t, i, None) {
+                Some(kv) -> rbStream_f(defaultV, t, Some((i, kv))),
+                None -> rbStream_f(defaultV, t, None)
+              }
+            } else {
+              match RB.findLUB(t, i, None) {
+                Some(kv) -> rbStream_f(defaultV, t, Some((i, kv))),
+                None -> rbStream_f(defaultV, t, None)
+              }
+            },
+          None -> rbStream_f(defaultV, t, None)
+        },
+      \() ->
+        match p {
+          Some (i, (j, _)) -> i = j,
+          None -> False
+        },
+      \() ->
+        match p {
+          Some (_, (_, v)) -> v,
+          None -> defaultV
+        }
+    )
+
+  pub rbToStream(default: a, t: Tree a): Stream Int a =
+    rbStream(default, Some(RB.first(t)))
+
+  pub rbToStream_il(default: a, t: Tree a): Stream Int a =
+    let init = match RB.min(t) { None -> None, Some(k) -> Some(k, (k, default)) } in
+    rbStream_f(default, t, init)
+
+  pub mapWithKey(f: (k, v1) -> v2, s: Stream k v1): Stream k v2 =
+    let Stream(valid, index, seek, ready, value) = s in
+    Stream(valid, index, \(i,r) -> mapWithKey(f, seek(i,r)), ready, \() -> f(index(), value()))
+
+  pub map(f: v1 -> v2, s: Stream k v1): Stream k v2 = mapWithKey(\(_, v) -> f(v), s)
+
+  pub intMul(a: Stream Int Int, b: Stream Int Int): Stream Int Int = multiply(\(i,j) -> i*j, a, b)
+
+  pub type SparseArray k v { SparseArray(Array k, Array v) }
+
+  pub saStr(s : SparseArray Int Int): Array Byte =
+    let SparseArray(ks,vs) = s in
+    Array.str(ks, String.int_to_string)
+    |> Array.concat("\n")
+    |> Array.concat(Array.str(vs, String.int_to_string))
+
+  pub toArray(s: Stream k v): SparseArray k v =
+    fold(\(SparseArray(ks, vs), k, v) -> SparseArray(push(ks, k), push(vs, v)),
+         s, SparseArray([], []))
+
+  pub sum(s : Stream k Int) : Int =
+    fold(\(acc, _, v) -> acc + v, s, 0)
+
+  pub test3(n: Int) : Int =
+    let mul = \(i,j) -> i * j in
+    let i = range(0,n) in
+    let j = range(0,n) in
+    let k = range(0,n) in
+    sum(multiply(mul, i, multiply(mul, j, k)))
+
+  pub test4_aux(n: Int): SparseArray Int Int =
+    let mul = \(i,j) -> i * j in
+    let a = toArray(map(\k -> k, range(0,n))) in
+    a
+
+  pub test4(s: SparseArray Int Int) : Int =
+    let x = sparse(s) in
+    sum(intMul(x, intMul(x,x)))
+
+  mod_neg(i: Int, j: Int): Int = i - j * (i/j)
+  mod(i: Int, j: Int): Int = mod_neg(mod_neg(i,j) + j, j)
+
+  swap(arr: Array a, i: Int, j: Int): Array a =
+    let temp = Array.get(arr, i) in
+    arr
+      |> Array.set(i, Array.get(arr, j))
+      |> Array.set(j, temp)
+
+  shuffle_aux(i: Int, n: Int, xs: Array a, r: Rand.Mt19937_64): Array a =
+    if i < n-1 {
+      let (r_, j_) = mt19937_64_next(r) in
+      let j = i + mod(j_, n - i) in
+      shuffle_aux(i+1, n, swap(xs, i, j), r_)
+    } else { xs }
+
+  shuffle(xs: Array a, k: Int, seed: Int): Array a =
+    shuffle_aux(0, k+1, xs, seed_mt19937_64(seed))
+
+  for(start: Int, stop: Int, init: a, func: ((a, Int) -> a)): a =
+    Iter.range(start, stop) |> Iter.foldl(init, func)
+
+  partition(arr: Array Int, lo: Int, hi: Int): (Int, Array Int) =
+    let pivot = Array.get(arr, hi) in
+    for(lo, hi + 1, (lo, arr),
+      \((i, a), j) ->
+        if j = hi {
+          (i, swap(a, i, hi))
+        } else if Array.get(a, j) < pivot {
+          (i + 1, swap(a, i, j))
+        } else {
+          (i, a)
+        }
+    )
+
+  quicksort_help(arr: Array Int, lo: Int, hi: Int): Array Int =
+    if lo >= hi {
+      arr
+    } else {
+      let (sep, partitioned_arr) = partition(arr, lo, hi) in
+      partitioned_arr
+        |> quicksort_help(lo, sep - 1)
+        |> quicksort_help(sep + 1, hi)
+    }
+
+  quicksort(arr: Array Int): Array Int =
+    quicksort_help(arr, 0, len(arr) - 1)
+
+  pub rand_array(n: Int, sparsity: Int, seed: Int): Array Int =
+    let xs = Array.from_iter(Iter.range(0,n*sparsity)) in
+    quicksort(Array.from_iter(Iter.take(Iter.items(shuffle(xs, n, seed)), n)))
+
+  pub test_rb1(t: RB.Tree Int): SparseArray Int Int =
+    let s = rbToStream(0, t) in
+    toArray(s)
+
+  pub test_rb_mul_aux(n: Int): (RB.Tree Bool, RB.Tree Bool, RB.Tree Bool) =
+    let a1 = rand_array(n, 10,1) in
+    let a2 = rand_array(n, 10,2) in
+    let a3 = rand_array(n, 10,3) in
+    (RB.of_array(a1), RB.of_array(a2), RB.of_array(a3))
+
+  // linear traversal with zippers
+  pub test_rb_mul(ts: (RB.Tree Bool, RB.Tree Bool, RB.Tree Bool)): Int =
+    let mul = \(i,j) -> i && j in
+    let (t1, t2, t3) = ts in
+    let s1 = rbToStream(False, t1) in
+    let s2 = rbToStream(False, t2) in
+    let s3 = rbToStream(False, t3) in
+    let out = multiply(mul, s1, multiply(mul, s2, s3)) in
+    sum(map(\_ -> 1, out))
+
+  // lookup traversal
+  pub test_rb_mul_s_il(ts: (RB.Tree Bool, RB.Tree Bool, RB.Tree Bool)): Int =
+    let mul = \(i,j) -> i && j in
+    let (t1, t2, t3) = ts in
+    let s1 = rbToStream_il(False, t1) in
+    let s2 = rbToStream_il(False, t2) in
+    let s3 = rbToStream_il(False, t3) in
+    let out = multiply(mul, s1, multiply(mul, s2, s3)) in
+    sum(map(\_ -> 1, out))
+
+  // iterate one, find others
+  pub test_rb_mul_il(ts: (RB.Tree Bool, RB.Tree Bool, RB.Tree Bool)): Int =
+    let (t1, t2, t3) = ts in
+    RB.fold(t1, 0, \(key,_,acc) -> acc +
+      match (RB.find(t2, key), RB.find(t3, key)) {
+        (Some(_), Some(_)) -> 1,
+        _ -> 0
+      })
+
+} with { String, Array, Option, RB, Rand, Iter}
+
+
+pub n: Int = 500000
+//pub n: Int = 1000000
+
+pub repeat(fn: () -> Int, count: Int): Int =
+  if count <= 1 { fn() } else { let _ = fn() in repeat(fn, count-1) }
+
+proc main(): () =
+  let count = 10 in
+  do writeln(int_to_string(repeat(\() -> Stream.test3(n), count))) then
+  let s = Stream.test4_aux(n) in
+  do writeln(int_to_string(repeat(\() -> Stream.test4(s), count))) then
+
+  let t = RB.make_tree_rbtree(n) in
+  let ts = Stream.test_rb_mul_aux(n) in
+  do writeln(int_to_string(repeat(\() -> Stream.test_rb_mul(ts), 1))) then
+  do writeln(int_to_string(repeat(\() -> Stream.test_rb_mul_s_il(ts), 1))) then
+  do writeln(int_to_string(repeat(\() -> Stream.test_rb_mul_il(ts), 1))) then
+  ()
+

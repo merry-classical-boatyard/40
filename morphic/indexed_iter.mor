@@ -1,0 +1,104 @@
+// This is an alternate presentation of indexed streams that looks more like traditional Stream fusion
+//   (it seems to be a little slower, too)
+
+module Core = file "core/core.mor"
+  expose {
+    module String expose { int_to_string },
+    module Array expose { concat },
+    module Io expose { writeln },
+  }
+
+
+module Iter = {
+
+  // Stream Definition
+  pub type Step k v {
+    Done, Skip(Iter k v), Emit(Iter k v, k, v)
+  }
+
+  pub type Iter k v {
+    Iter( (k, Bool) -> Step k v )
+  }
+
+  pub multiply(mul: (v1, v2) -> v3, a: Iter Int v1, b: Iter Int v2): Iter Int v3 =
+    let Iter(fnA) = a in
+    let Iter(fnB) = b in
+
+    Iter(\(i, ready) ->
+      match (fnA(i, ready), fnB(i, ready)) {
+        (Done, _)            -> Done,
+        (_, Done)            -> Done,
+        (Skip(a_), Skip(b_)) -> Skip(multiply(mul, a_, b_)),
+        (Skip(a_), _)        -> Skip(multiply(mul, a_, b)),
+        (_, Skip(b_))        -> Skip(multiply(mul, a, b_)),
+        (Emit(a_, i1, v1), Emit(b_, i2, v2)) ->
+          if i1 < i2 {
+            Skip(multiply(mul, a_, b))
+          } else if i2 < i1 {
+            Skip(multiply(mul, a, b_))
+          } else {
+            Emit(multiply(mul, a_, b_), i1, mul(v1,v2)) // confusing error message (or bug?) when I previously wrote mul(v1, v2)
+          }
+      }
+    )
+
+  pub int_multiply(a: Iter Int Int, b: Iter Int Int): Iter Int Int = multiply(\(i, j) -> i*j, a, b)
+
+  pub range(lo: Int, hi: Int): Iter Int Int =
+    Iter(\(i, ready) ->
+      let advance = if ready { lo <= i } else { lo < i } in
+      if advance {
+        if lo < hi {
+          Emit(range(lo+1, hi), lo+1, lo+1)
+        } else { Done }
+      } else { Skip(range(lo, hi)) })
+
+  pub zero(): Iter Int Int = Iter(\_ -> Done)
+
+  pub map(iter: Iter k a, f: a -> b): Iter k b =
+    let Iter(fn) = iter in
+    Iter(\(i, ready) ->
+      match fn(i, ready) {
+        Emit(xs, k, v) -> Emit(map(xs, f), k, f(v)),
+        Skip(xs) -> Skip(map(xs, f)),
+        Done -> Done,
+      })
+
+  pub array(arr: Array a): Iter Int a =
+    map(range(0, len(arr)), \idx -> get(arr, idx))
+
+  // evaluate
+  pub fold(f : (b,k,v) -> b, iter: Iter k v, i: k, ready: Bool, acc: b): b =
+    let Iter(fn) = iter in
+    match fn(i, ready) {
+      Done -> acc,
+      Skip(a) -> fold(f, a, i, False, acc),
+      Emit(a, k, v) -> fold(f, a, k, True, f(acc,k,v))
+    }
+
+  pub toArray(s: Iter Int v): (Array Int, Array v) =
+    fold(\((ks, vs), k, v) -> (push(ks, k), push(vs, v)),
+         s, 0, True, ([], []))
+
+  pub sum(it : Iter k Int, k0 : k) : Int =
+    fold(\(acc, _, v) -> acc + v,
+         it, k0, True, 0)
+
+  pub test1 : Int = sum(range(0,10000000), 0)
+  pub test2 : Int = sum(zero(), 0)
+
+  pub test3(nb: Int) : Int =
+    let n = nb - 1 in
+    let i = range(0,n) in
+    let j = range(0,n) in
+    let k = range(0,n) in
+    sum(int_multiply(int_multiply(i,j), k), 0)
+
+  pub test4() : Int =
+    let n = 100000000 in
+    let i = range(0,n) in
+    let j = range(0,n) in
+    let (is, vs) = toArray(int_multiply(i,j)) in
+    len(is)
+
+}

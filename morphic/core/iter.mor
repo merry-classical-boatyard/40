@@ -1,0 +1,179 @@
+import Option expose { Option { Some, None } }
+
+pub type Iter a {
+  Iter(() -> Option (a, Iter a))
+}
+
+// Creating iterators:
+
+pub empty: Iter a =
+  Iter(\() -> None)
+
+pub once(x: a): Iter a =
+  Iter(\() -> Some(x, empty))
+
+pub forever(x: a): Iter a =
+  Iter(\() -> Some(x, forever(x)))
+
+pub range(lo: Int, hi: Int): Iter Int =
+  Iter(\() ->
+    if lo < hi {
+      Some(lo, range(lo + 1, hi))
+    } else {
+      None
+    }
+  )
+
+pub ints(lo: Int): Iter Int =
+  Iter(\() -> Some(lo, ints(lo + 1)))
+
+pub items(arr: Array a): Iter a =
+  map(range(0, len(arr)), \idx -> get(arr, idx))
+
+// Transforming iterators:
+
+pub cons_lazy(x: () -> a, xs: () -> Iter a): Iter a =
+  Iter(\() -> Some(x(), xs()))
+
+pub chain_lazy(fst: Iter a, snd: () -> Iter a): Iter a =
+  Iter(\() ->
+    match next(fst) {
+      Some(x, xs) -> Some(x, chain_lazy(xs, snd)),
+      None -> next(snd()),
+    }
+  )
+
+pub chain(fst: Iter a, snd: Iter a): Iter a =
+  chain_lazy(fst, \() -> snd)
+
+pub map(it: Iter a, f: a -> b): Iter b =
+  Iter(\() ->
+    match next(it) {
+      Some(x, xs) -> Some(f(x), map(xs, f)),
+      None -> None,
+    }
+  )
+
+pub flatten(it: Iter (Iter a)): Iter a =
+  Iter(\() ->
+    match next(it) {
+      Some(x, xs) -> next(chain_lazy(x, \() -> flatten(xs))),
+      None -> None,
+    }
+  )
+
+pub flat_map(it: Iter a, f: a -> Iter b): Iter b =
+  flatten(map(it, f))
+
+pub filter(it: Iter a, f: a -> Bool): Iter a =
+  Iter(\() ->
+    match next(it) {
+      Some(x, xs) -> if f(x) {
+        Some(x, filter(xs, f))
+      } else {
+        next(filter(xs, f))
+      },
+      None -> None,
+    }
+  )
+
+pub take(it: Iter a, count: Int): Iter a =
+  if count > 0 {
+    Iter(\() ->
+      match next(it) {
+        Some(x, xs) -> Some(x, take(xs, count - 1)),
+        None -> None,
+      }
+    )
+  } else {
+    empty
+  }
+
+pub take_while(it: Iter a, f: a -> Bool): Iter a =
+  Iter(\() ->
+    match next(it) {
+      Some(x, xs) -> if f(x) {
+        Some(x, take_while(xs, f))
+      } else {
+        None
+      },
+      None -> None,
+    }
+  )
+
+pub zip(it1: Iter a, it2: Iter b): Iter (a, b) =
+  Iter(\() ->
+    match (next(it1), next(it2)) {
+      (Some(x, xs), Some(y, ys)) -> Some((x, y), zip(xs, ys)),
+      _ -> None,
+    }
+  )
+
+pub enumerate(it: Iter a): Iter (Int, a) =
+  zip(ints(0), it)
+
+// Consuming iterators:
+
+pub next(it: Iter a): Option (a, Iter a) =
+  let Iter(body) = it in body()
+
+pub foldl(it: Iter a, init: b, combine: (b, a) -> b): b =
+  match next(it) {
+    Some(x, xs) -> foldl(xs, combine(init, x), combine),
+    None -> init,
+  }
+
+pub foldr(it: Iter a, init: b, combine: (a, b) -> b): b =
+  match next(it) {
+    Some(x, xs) -> combine(x, foldr(xs, init, combine)),
+    None -> init,
+  }
+
+pub sum(it: Iter Int): Int =
+  foldl(it, 0, \(x, y) -> x + y)
+
+pub count(it: Iter a): Int =
+  sum(map(it, \_ -> 1))
+
+pub any(it: Iter a, f: a -> Bool): Bool =
+  match next(it) {
+    Some(x, xs) -> if f(x) { True } else { any(xs, f) },
+    None -> False,
+  }
+
+pub all(it: Iter a, f: a -> Bool): Bool =
+  match next(it) {
+    Some(x, xs) -> if f(x) { all(xs, f) } else { False },
+    None -> True,
+  }
+
+pub equal(it1: Iter a, it2: Iter a, eq: (a, a) -> Bool): Bool =
+  match (next(it1), next(it2)) {
+    (None, None) -> True,
+    (Some(x, xs), Some(y, ys)) ->
+      if eq(x, y) {
+        equal(xs, ys, eq)
+      } else {
+        False
+      },
+    (_, _) -> False,
+  }
+
+pub find(it: Iter a, f: a -> Bool): Option a =
+  match next(it) {
+    Some(x, xs) -> if f(x) {
+      Some(x)
+    } else {
+      find(xs, f)
+    },
+    None -> None,
+  }
+
+pub proc for_each(it: Iter a, f: proc a -> ()): () =
+  match next(it) {
+    Some(x, xs) ->
+      do f(x) then
+      do for_each(xs, f),
+
+    None -> (),
+  }

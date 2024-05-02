@@ -1,0 +1,19 @@
+pub module Option = file "option.mor"
+
+pub module Iter = file "iter.mor" with { Option }
+
+pub module Array = file "array.mor" with { Iter }
+
+pub module String = file "string.mor" with { Array, Option, Iter }
+
+pub module Func = file "func.mor"
+
+pub module Io = file "io.mor"
+
+pub module Math = file "math.mor"
+
+pub module Control = file "control.mor"
+
+pub module Rand = file "rand.mor" with { Array, Math }
+
+pub module State = file "state.mor" with { Iter }

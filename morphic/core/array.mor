@@ -1,0 +1,62 @@
+import Iter expose { Iter }
+
+// TODO: This is a temporary workaround.  We should have a namespacing system for builtins.
+module NoShadow = {
+  pub get_: (Array a, Int) -> a = get
+  pub len_: Array a -> Int = len
+  pub push_: (Array a, a) -> Array a = push
+}
+
+pub get: (Array a, Int) -> a = NoShadow.get_
+pub len: Array a -> Int = NoShadow.len_
+pub push: (Array a, a) -> Array a = NoShadow.push_
+
+pub set(arr: Array a, i: Int, val: a): Array a =
+  let (_, hole) = extract(arr, i) in
+  hole(val)
+
+pub update(arr: Array a, i: Int, f: a -> a): Array a =
+  let (x, hole) = extract(arr, i) in
+  hole(f(x))
+
+concat_from(a: Array t, b: Array t, i: Int): Array t =
+  if i = len(b) {
+    a
+  } else {
+    concat_from(push(a, get(b, i)), b, i + 1)
+  }
+
+pub concat(a: Array t, b: Array t): Array t =
+  concat_from(a, b, 0)
+
+fill_with_rec(arr: Array t, count: Int, mk_val: () -> t): Array t =
+  if count > 0 {
+    fill_with_rec(push(arr, mk_val()), count - 1, mk_val)
+  } else {
+    arr
+  }
+
+pub fill_with(count: Int, mk_val: () -> t): Array t =
+  fill_with_rec(reserve([], count), count, mk_val)
+
+pub fill(count: Int, val: t): Array t =
+  fill_with(count, \() -> val)
+
+pub from_iter_with_capacity(iter: Iter a, capacity: Int): Array a =
+  Iter.foldl(iter, reserve([], capacity), push)
+
+pub from_iter(iter: Iter a): Array a =
+  from_iter_with_capacity(iter, 0)
+
+pub str(arr: Array a, s: a -> Array Byte): Array Byte =
+  let n = len(arr) - 1 in
+  Iter.items(arr)
+    |> Iter.take(n)
+    |> Iter.foldl(
+        "[",
+        \(accum, item) -> accum
+          |> concat(s(item))
+          |> concat(", ")
+    )
+    |> concat(s(get(arr, n)))
+    |> concat("]")

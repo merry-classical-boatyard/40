@@ -1,0 +1,9 @@
+module Foo = {
+  pub bar(): Int = 3
+}
+
+module Bar = {
+  import Foo expose { bar }
+}
+
+// from Foo expose { bar }

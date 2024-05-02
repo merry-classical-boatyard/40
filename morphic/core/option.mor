@@ -1,0 +1,64 @@
+pub type Option a {
+  pub Some(a),
+  pub None,
+}
+
+pub is_some(opt: Option a): Bool =
+  match opt {
+    Some(x) -> True,
+    None -> False,
+  }
+
+pub is_none(opt: Option a): Bool =
+  match opt {
+    Some(x) -> False,
+    None -> True,
+  }
+
+pub or_default(opt: Option a, def: a): a =
+  match opt {
+    Some(x) -> x,
+    None -> def,
+  }
+
+pub map(opt: Option a, fn: a -> b): Option b =
+  match opt {
+    Some(x) -> Some(fn(x)),
+    None -> None,
+  }
+
+pub and_then(opt: Option a, fn: a -> Option b): Option b =
+  match opt {
+    Some(x) -> fn(x),
+    None -> None,
+  }
+
+pub or_else(opt: Option a, fn: () -> Option a): Option a =
+  match opt {
+    Some(x) -> Some(x),
+    None -> fn(),
+  }
+
+identity(x: a): a = x
+
+pub flatten(opt: Option (Option a)): Option a =
+  and_then(opt, identity)
+
+pub both(fst: Option a, snd: Option b): Option (a, b) =
+  match (fst, snd) {
+    (Some(x), Some(y)) -> Some(x, y),
+    _ -> None,
+  }
+
+pub either(fst: Option a, snd: Option a): Option a =
+  match (fst, snd) {
+    (Some(x), _) -> Some(x),
+    (_, Some(y)) -> Some(y),
+    (None, None) -> None,
+  }
+
+pub unwrap(opt: Option a): a =
+  match opt {
+    Some(x) -> x,
+    None -> panic("Cannot call 'Option.unwrap' on a 'None' value\n"),
+  }
